@@ -1,0 +1,73 @@
+#!/bin/bash
+# Where is Sundtek mediaclient located?
+MEDIACLIENT="/opt/bin/mediaclient"
+
+# Unitymedia Internet Downstream Belegung
+# Quelle: http://www.unitymedia-kabelbw-helpdesk.de/tv/nrw_he-digital-tv.html
+# 578,586,602 MHz Quelle: Intern UM.
+# Weitere Quelle: http://www.unitymediakabelbwforum.de/viewtopic.php?f=80&t=18777&start=10#p205712
+freqs="578000000 586000000 594000000 602000000 618000000 626000000 634000000 642000000"
+declare -A freqColor
+freqColor[578000000]=484AFE
+freqColor[586000000]=4878FE
+freqColor[594000000]=48A6FF
+freqColor[602000000]=48D3FE
+freqColor[618000000]=48FEFC
+freqColor[626000000]=48D3FE
+freqColor[634000000]=48A6FF
+freqColor[642000000]=4878FE
+
+
+case $1 in
+   config)
+        echo "graph_title Unitymedia Segmentauslastung DOCSIS YourCity
+graph_args --base 1024 -l 0 -u 400000
+graph_vlabel Bit/s
+graph_info Anzeige der Auslastung der Downstream Kanaele Unitymedia in YourCity
+graph_category unitymedia
+"
+	COUNTER=0
+	for freq in $freqs
+	do
+		freqMhz=`expr $freq / 1000000`
+		# Erste Linie
+		if [ $COUNTER -eq 0 ]; then
+                echo "$freq.label $freqMhz MHz Auslastung in Bit/sec
+$freq.draw AREA
+$freq.warning 42500
+$freq.critical 49500
+$freq.colour ${freqColor[$freq]}
+"
+		else
+		# Standardfall
+		echo "$freq.label $freqMhz MHz Auslastung in Bit/sec
+$freq.draw STACK
+$freq.warning 42500
+$freq.critical 49500
+$freq.colour ${freqColor[$freq]}
+"
+		fi
+		COUNTER=`expr $COUNTER + 1`
+	done
+	# Ab 80 proz. erhoehte wachsamkeit ab 90 proz. ueberlastung (quelle UM-MB inoff.)
+	echo "sum.label Gesamtauslastung in Bit/sec
+sum.draw LINE2
+sum.warning 320000
+sum.critical 360000
+sum.colour 4D4D4D
+"
+        exit 0
+;;
+esac
+
+sum=0
+for freq in $freqs
+do
+	# Tune to frequency
+	${MEDIACLIENT} -m DVBC -f $freq -S 6952000 -M Q256 -d /dev/dvb/adapter1/frontend0 1> /dev/null
+	# Get bandwidth usage
+	bandwidth=`timeout 3 dvbsnoop -adapter 1 -s bandwidth 8190 -n 5000 -hideproginfo | awk -F: 'END { print $NF }' | sed 's/^[ t]*//' | awk '{print $1}'`
+	echo $freq.value $bandwidth
+	sum=`echo "scale=3; $sum + $bandwidth" | bc`
+done
+echo sum.value $sum
